@@ -38,15 +38,15 @@ from medslot.states import AdminDayStates, DoctorSetupStates
 router = Router(name="admin")
 
 
-def is_admin(user_id: int, settings: Settings) -> bool:
+def is_admin(user_id: int | None, settings: Settings) -> bool:
     """Authorize an action using configured Telegram user IDs."""
-    return user_id in settings.admin_ids
+    return user_id is not None and user_id in settings.admin_ids
 
 
 @router.message(Command("admin"))
 async def admin_menu(message: Message, settings: Settings) -> None:
     """Show the admin menu to configured clinic staff."""
-    if not is_admin(message.from_user.id, settings):
+    if not is_admin(message.from_user.id if message.from_user else None, settings):
         return
     await message.answer(texts.ADMIN_MENU, reply_markup=admin_menu_keyboard())
 
@@ -190,7 +190,7 @@ async def show_doctor_card(
 @router.message(DoctorSetupStates.doctor_details)
 async def receive_doctor_details(message: Message, state: FSMContext, settings: Settings) -> None:
     """Parse a new doctor name and specialty before schedule setup."""
-    if not is_admin(message.from_user.id, settings):
+    if not is_admin(message.from_user.id if message.from_user else None, settings):
         await state.clear()
         return
     if not message.text or "|" not in message.text:
@@ -210,7 +210,7 @@ async def receive_schedule_line(
     message: Message, state: FSMContext, settings: Settings, session: AsyncSession
 ) -> None:
     """Collect weekly schedule rows and save the doctor when complete."""
-    if not is_admin(message.from_user.id, settings):
+    if not is_admin(message.from_user.id if message.from_user else None, settings):
         await state.clear()
         return
     if not message.text:
@@ -416,7 +416,7 @@ async def receive_closure_reason(
     timezone_name: str,
 ) -> None:
     """Close a doctor's date with the admin's reason and notify booked patients."""
-    if not is_admin(message.from_user.id, settings):
+    if not is_admin(message.from_user.id if message.from_user else None, settings):
         await state.clear()
         return
     reason = (message.text or "").strip()
