@@ -1,112 +1,113 @@
 # MedSlot
 
-MedSlot is a Telegram bot for booking appointments with a medical clinic. Patients can find a
-doctor by specialty, choose an available time, manage their bookings, and receive reminders.
-Clinic admins maintain doctors and their weekly schedules, review a doctor's daily bookings,
-and close a day when a doctor is away.
+MedSlot is a Telegram appointment booking bot for a medical clinic. Patients can find a doctor,
+book or move an appointment, manage their contact profile, and receive reminders. Clinic admins
+manage doctors and schedules, review patient details, close clinic days, and record attendance.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Patient[Patient in Telegram] --> Bot[aiogram 3 handlers and FSM]
+    Patient[Patient in Telegram] --> Bot[aiogram 3 routers and persistent FSM]
     Admin[Clinic admin in Telegram] --> Bot
-    Bot --> Services[Booking and schedule services]
+    Bot --> Services[Booking and patient services]
     Services --> DB[(SQLite via async SQLAlchemy)]
+    Migrations[Alembic] --> DB
     Scheduler[APScheduler reminder scan] --> DB
     Scheduler --> Patient
-    Services --> Patient
+    Bot --> Admin
 ```
 
-The handlers validate Telegram input and delegate business rules to services. The weekly
-schedule is stored, while concrete appointment slots are generated for a requested date.
-Appointments store UTC start times; calendar dates and messages use the configured clinic
-timezone. SQLite has a partial unique index on `(doctor_id, starts_at)` for active bookings,
-so a database constraint resolves simultaneous attempts for the same slot.
+Handlers validate Telegram input and delegate business rules to service functions. Weekly work
+intervals are stored; concrete free slots are generated for the requested date. Appointment
+timestamps are stored in UTC and displayed in the clinic timezone. A partial unique index on
+`(doctor_id, starts_at)` for active bookings protects against concurrent duplicate reservations.
 
 ## Run with Docker Compose
 
-1. Install Docker Desktop or Docker Engine with the Compose plugin.
-2. Copy `.env.example` to `.env`.
-3. Set `BOT_TOKEN`, `ADMIN_IDS`, and, if needed, `TIMEZONE` in `.env`.
-4. Start the bot with `docker compose up -d --build`.
-5. Inspect logs with `docker compose logs -f medslot`.
+1. Install Docker Engine or Docker Desktop with the Compose plugin.
+2. Copy `.env.example` to `.env` and set `BOT_TOKEN` and `ADMIN_IDS`.
+3. Start the bot with `docker compose up -d --build`.
+4. Follow logs with `docker compose logs -f medslot`.
 
-The database is stored in the `medslot-data` named volume. Only one bot process should use
-this SQLite database and Telegram token at a time.
+The SQLite file is stored in the `medslot-data` named volume. Run one bot process against a
+SQLite database and Telegram token at a time.
 
 ## Run locally
 
-Python 3.12 and `uv` are required. After creating `.env` from `.env.example`:
+Python 3.12 and `uv` are required. Copy `.env.example` to `.env`, then run:
 
 ```bash
 uv sync --extra dev
 uv run python -m medslot
 ```
 
-## Patient commands
+Pending Alembic migrations are applied before polling starts. Existing databases from the
+previous create-all version are adopted in place; existing appointments are retained.
+
+## Patient commands and flow
 
 | Command | Result |
 |---|---|
-| `/start` | Opens the patient entry points and clears an unfinished flow. |
-| `/book` | Select specialty, doctor, date, and generated free time slot. |
-| `/mine` | Lists active bookings with cancellation buttons. |
-| `/cancel` | Exits the current booking or admin setup step. |
+| `/start` | Shows patient entry points. |
+| `/book` | Select specialty, doctor, calendar date, and generated free slot. |
+| `/mine` | Lists active appointments with move and cancel actions. |
+| `/profile` | Shows or edits the patient's name and phone. |
+| `/privacy` | Explains the use of patient contact details. |
+| `/cancel` | Exits the current dialog. |
 
-Example: `/book` → `General practice` → `Dr Example` → `2026-10-12` → `09:30`.
-The actual choices depend on the doctors and schedules entered by the clinic admin.
+Before a first booking, the patient enters a full name and shares a Telegram contact or types a
+phone number. The bot then asks for explicit consent before saving those details. The patient can
+optionally add a visit reason of up to 200 characters. A reminder sent 24 hours and 2 hours before
+the appointment offers **Приду**, **Перенести**, and **Отменить**. Move and cancellation actions
+are available only at least two hours before the original appointment.
 
-## Admin commands
+Example: `/book` → choose a specialty → choose a doctor → choose a calendar date → select a time
+→ enter an optional visit reason. Exact options depend on the clinic's schedule.
 
-Only numeric IDs listed in `ADMIN_IDS` can use these commands. Permission is checked in each
-handler and at the time of the action.
+## Admin menu
 
-| Command | Result |
-|---|---|
-| `/admin` | Shows the admin command list. |
-| `/add_doctor` | Starts a guided doctor and schedule form. |
-| `/doctors` | Lists doctors and their IDs. |
-| `/day YYYY-MM-DD ID` | Lists a doctor's active bookings for a clinic-local date. |
-| `/close_day YYYY-MM-DD ID reason` | Closes that doctor's date and notifies booked patients. |
+Only Telegram IDs listed in `ADMIN_IDS` can access `/admin`. The menu uses buttons to select a
+doctor and date; admins do not need to type doctor IDs.
 
-For `/add_doctor`, enter the doctor as `Name | Specialty`, then one weekly schedule line per
-working interval: `1,3,5 09:00 17:00 30`. Weekdays use `1=Monday` through `7=Sunday`; the last
-number is the appointment duration in minutes. Enter `готово` to save. Overlapping intervals
-on one weekday are rejected.
+- **Врачи** opens doctor cards. Admins can change the name, specialty, weekly schedule, or
+  activation status.
+- **Добавить врача** asks for `Name | Specialty`, then schedule rows such as
+  `1,3,5 09:00 17:00 30`. Weekdays are `1=Monday` through `7=Sunday`; the final value is the
+  appointment duration in minutes. Enter `готово` to save.
+- **Расписание дня** opens a doctor picker and calendar. Each row shows patient name, phone,
+  visit reason, confirmation, and no-show count. Attendance can be marked after the appointment
+  start time.
+- **Закрыть день** cancels that date's active appointments and sends affected patients a notice.
+  **Открыть день** restores generated slots; appointments already cancelled by closure remain
+  cancelled and are not silently restored.
 
-Example admin requests:
+## Screenshots
 
-```text
-/day 2026-10-12 4
-/close_day 2026-10-12 4 Sick leave
-```
+- [Patient booking](docs/screenshots/patient-booking.png)
+- [Patient profile](docs/screenshots/patient-profile.png)
+- [Admin menu](docs/screenshots/admin-menu.png)
+- [Admin day schedule](docs/screenshots/admin-day-schedule.png)
 
-Closing a day marks active appointments as closed and sends each affected patient a message.
-The original appointment remains in the database history.
+Screenshots can be added to those paths.
 
 ## Technical decisions
 
-- **aiogram 3 and FSM:** the patient selects specialty, doctor, date, and slot through inline
-  controls. `/start` and `/cancel` clear an unfinished flow.
-- **SQLAlchemy async and SQLite:** a single-process clinic bot can run without a separate
-  database service. SQLite runs with foreign keys, WAL, and a busy timeout.
-- **Generated slots:** recurring schedules define availability; no slot rows are pre-created.
-  A slot is offered only when its full duration fits before closing and its start time is in
-  the future.
-- **Race protection:** the service checks availability again, then the database's partial
-  unique index prevents a second active booking. An integrity conflict becomes a user-facing
-  “slot no longer available” response.
-- **Cancellation:** cancellation is allowed at exactly two hours before an appointment and
-  rejected inside that window.
-- **Reminders:** APScheduler scans persisted appointments once per minute. The 24-hour reminder
-  is skipped if the appointment was created after its 24-hour point; the same applies to the
-  2-hour reminder. Successful sends are recorded to avoid repeat delivery.
-- **Data minimization:** the bot stores Telegram numeric IDs and booking details only. It does
-  not request a patient's diagnosis, phone number, or medical documents.
-- **Timezone:** `TIMEZONE` defaults to `Europe/Tallinn` and should be set to the clinic's IANA
-  timezone. Appointment timestamps are stored in UTC.
-- **Schema setup:** tables are created at startup for this first version; a migration framework
-  is not included.
+- **SQLite and async SQLAlchemy:** suitable for a single bot process and straightforward backup.
+- **Alembic:** schema changes are applied as versioned migrations; the adoption migration skips
+  legacy tables and the next migration adds patient data and appointment fields in place.
+- **Persistent FSM:** dialog state and JSON data live in SQLite, so active flows survive restart.
+- **Slot generation:** slots are derived from weekly intervals for a requested date and are not
+  pre-created in the database.
+- **Booking race protection:** a partial unique database index is the final authority when two
+  requests try to reserve one slot simultaneously; the service converts the conflict to a clear
+  user message.
+- **Rescheduling:** an appointment row is moved in one transaction. The old slot remains occupied
+  if reserving the new slot fails.
+- **Consent and visibility:** the bot stores a patient's name and phone only after consent. Clinic
+  admins see these fields in the schedule; do not use the bot to submit diagnoses or documents.
+- **Timezone:** `TIMEZONE` defaults to `Europe/Tallinn`; set it to the clinic's IANA timezone.
+- **Logging and errors:** middleware logs update failures and returns a neutral Russian message.
 
 ## Configuration
 
@@ -125,4 +126,4 @@ uv run ruff format --check .
 uv run python -m pytest
 ```
 
-GitHub Actions runs Ruff lint, formatting checks, and pytest on every push and pull request.
+GitHub Actions runs lint, formatting, and tests for every push and pull request.
