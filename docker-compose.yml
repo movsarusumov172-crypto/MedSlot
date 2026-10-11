@@ -1,0 +1,10 @@
+services:
+  medslot:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - medslot-data:/app/data
+
+volumes:
+  medslot-data:
