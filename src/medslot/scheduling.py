@@ -5,6 +5,8 @@ from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from zoneinfo import ZoneInfo
 
+from medslot import texts
+
 
 @dataclass(frozen=True, slots=True)
 class ScheduleWindow:
@@ -29,9 +31,9 @@ def parse_clock(value: str) -> time:
     try:
         parsed = time.fromisoformat(value)
     except ValueError as error:
-        raise ValueError("время указывается в формате ЧЧ:ММ") from error
+        raise ValueError(texts.SCHEDULE_TIME_FORMAT) from error
     if parsed.second or parsed.microsecond or len(value) != 5:
-        raise ValueError("время указывается в формате ЧЧ:ММ")
+        raise ValueError(texts.SCHEDULE_TIME_FORMAT)
     return parsed
 
 
@@ -40,23 +42,23 @@ def validate_schedule(windows: list[ScheduleWindow]) -> None:
     intervals: dict[int, list[tuple[time, time]]] = {}
     for window in windows:
         if not 0 <= window.weekday <= 6:
-            raise ValueError("день недели должен быть от 0 до 6")
+            raise ValueError(texts.SCHEDULE_WEEKDAY_RANGE)
         if window.duration_minutes <= 0:
-            raise ValueError("длительность приёма должна быть больше нуля")
+            raise ValueError(texts.SCHEDULE_DURATION_POSITIVE)
         start = parse_clock(window.start_time)
         end = parse_clock(window.end_time)
         if start >= end:
-            raise ValueError("конец смены должен быть позже начала")
+            raise ValueError(texts.SCHEDULE_END_AFTER_START)
         interval_minutes = (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute)
         if window.duration_minutes > interval_minutes:
-            raise ValueError("приём не помещается в рабочий интервал")
+            raise ValueError(texts.SCHEDULE_DURATION_FITS)
         intervals.setdefault(window.weekday, []).append((start, end))
 
     for weekday_intervals in intervals.values():
         weekday_intervals.sort()
         for previous, current in pairwise(weekday_intervals):
             if current[0] < previous[1]:
-                raise ValueError("интервалы одного дня недели пересекаются")
+                raise ValueError(texts.SCHEDULE_OVERLAP)
 
 
 def generate_slots(

@@ -4,15 +4,16 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
 
 from medslot.admin import router as admin_router
 from medslot.appointments import router as appointments_router
 from medslot.config import get_settings
-from medslot.database import create_engine, create_session_factory, initialize_database
+from medslot.database import create_engine, create_session_factory
 from medslot.middleware import DatabaseSessionMiddleware, LoggingErrorMiddleware
+from medslot.migrations import upgrade_database
 from medslot.patient import router as patient_router
 from medslot.reminders import create_scheduler
+from medslot.sqlite_storage import SqliteFSMStorage
 
 
 async def main() -> None:
@@ -22,12 +23,12 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     settings = get_settings()
+    await asyncio.to_thread(upgrade_database, settings.database_url)
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
-    await initialize_database(engine)
 
     bot = Bot(token=settings.bot_token.get_secret_value())
-    dispatcher = Dispatcher(storage=MemoryStorage())
+    dispatcher = Dispatcher(storage=SqliteFSMStorage(session_factory))
     dispatcher["settings"] = settings
     dispatcher["timezone_name"] = settings.timezone
     dispatcher.update.outer_middleware(LoggingErrorMiddleware())

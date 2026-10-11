@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from medslot.config import Settings
-from medslot.models import Base
 
 
 class SQLiteCursor(Protocol):
@@ -51,9 +50,3 @@ def create_engine(settings: Settings) -> AsyncEngine:
 def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     """Create a session factory bound to the application engine."""
     return async_sessionmaker(engine, expire_on_commit=False)
-
-
-async def initialize_database(engine: AsyncEngine) -> None:
-    """Create missing tables for this single-process SQLite application."""
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)

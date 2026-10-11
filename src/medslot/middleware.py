@@ -5,8 +5,10 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Update
+from aiogram.types import CallbackQuery, TelegramObject, Update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from medslot import texts
 
 logger = logging.getLogger(__name__)
 
@@ -55,5 +57,9 @@ class LoggingErrorMiddleware(BaseMiddleware):
             )
             logger.exception("Update processing failed for Telegram user %s", user_id)
             if isinstance(update, Update) and update.message:
-                await update.message.answer("Не удалось выполнить действие. Попробуйте ещё раз.")
+                await update.message.answer(texts.ERROR_GENERIC)
+            elif isinstance(update, Update) and update.callback_query:
+                callback = update.callback_query
+                if isinstance(callback, CallbackQuery):
+                    await callback.answer(texts.ERROR_GENERIC, show_alert=True)
             return None

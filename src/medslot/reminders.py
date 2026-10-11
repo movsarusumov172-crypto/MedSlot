@@ -9,8 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import joinedload
 
+from medslot import texts
 from medslot.booking import as_utc
 from medslot.delivery import send_notice
+from medslot.keyboards import reminder_keyboard
 from medslot.models import Appointment, AppointmentStatus
 
 REMINDER_INTERVAL_SECONDS = 60
@@ -54,18 +56,22 @@ async def deliver_due_reminders(
         local_zone = ZoneInfo(timezone_name)
         for appointment in appointments:
             starts_at = as_utc(appointment.starts_at)
-            local_start = starts_at.astimezone(local_zone).strftime("%d.%m.%Y в %H:%M")
+            local_start = starts_at.astimezone(local_zone).strftime(texts.LOCAL_DATETIME_FORMAT)
             for hours, field_name in ((24, "reminder_24h_sent"), (2, "reminder_2h_sent")):
                 due = starts_at - current_time <= timedelta(hours=hours) and as_utc(
                     appointment.created_at
                 ) <= starts_at - timedelta(hours=hours)
                 if not due or getattr(appointment, field_name):
                     continue
-                text = (
-                    f"Напоминание: приём у врача {appointment.doctor.name} "
-                    f"{local_start} (через {hours} ч.)."
+                text = texts.REMINDER.format(
+                    doctor=appointment.doctor.name, when=local_start, hours=hours
                 )
-                sent = await send_notice(bot, appointment.patient_telegram_id, text)
+                sent = await send_notice(
+                    bot,
+                    appointment.patient_telegram_id,
+                    text,
+                    reply_markup=reminder_keyboard(appointment.id),
+                )
                 if not sent:
                     continue
                 setattr(appointment, field_name, True)

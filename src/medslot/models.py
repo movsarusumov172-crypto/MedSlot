@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -31,6 +32,14 @@ class AppointmentStatus(StrEnum):
     CLOSED = "closed"
 
 
+class AttendanceStatus(StrEnum):
+    """Attendance outcome recorded by an admin after an appointment."""
+
+    UNMARKED = "unmarked"
+    ATTENDED = "attended"
+    NO_SHOW = "no_show"
+
+
 class Doctor(Base):
     """A clinician and the specialty used to find them."""
 
@@ -43,6 +52,17 @@ class Doctor(Base):
     schedules: Mapped[list[WorkSchedule]] = relationship(
         back_populates="doctor", cascade="all, delete-orphan"
     )
+
+
+class PatientProfile(Base):
+    """Patient details stored after explicit processing consent."""
+
+    __tablename__ = "patient_profiles"
+
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    full_name: Mapped[str] = mapped_column(String(200))
+    phone: Mapped[str] = mapped_column(String(16))
+    consented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class WorkSchedule(Base):
@@ -96,7 +116,27 @@ class Appointment(Base):
     patient_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    visit_reason: Mapped[str | None] = mapped_column(String(200))
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    attendance_status: Mapped[str] = mapped_column(
+        String(16), default=AttendanceStatus.UNMARKED.value, server_default="unmarked"
+    )
     status: Mapped[str] = mapped_column(String(16), default=AppointmentStatus.BOOKED.value)
     reminder_24h_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     reminder_2h_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     doctor: Mapped[Doctor] = relationship()
+
+
+class FSMStateRecord(Base):
+    """Persistent aiogram FSM state keyed by chat, user, bot and destiny."""
+
+    __tablename__ = "fsm_state_records"
+
+    bot_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(primary_key=True, default=-1)
+    business_connection_id: Mapped[str] = mapped_column(String(128), primary_key=True, default="")
+    destiny: Mapped[str] = mapped_column(String(128), primary_key=True)
+    state: Mapped[str | None] = mapped_column(String(255))
+    data: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
